@@ -11,3 +11,7 @@ config.local.toml
 .DS_Store
 *.log
 deploy/.server-token
+
+# Produkcyjne sekrety — tylko lokalnie / na serwerze
+deploy/config.server.toml
+deploy/*.local.toml

@@ -1,5 +1,6 @@
-# Produkcja na serwerze — edytuj trasy / Amadeus / ntfy.
-# Po zmianie: sudo systemctl restart pingair
+# Szablon produkcji — skopiuj na serwer jako /opt/pingair/config.toml
+# NIE commituj prawdziwego config.toml (token, Amadeus, Telegram).
+# Po zmianie na serwerze: sudo systemctl restart pingair
 
 poll_interval_secs = 900
 db_path = "/opt/pingair/data/pingair.db"
@@ -19,7 +20,7 @@ cooldown_hours = 12
 [alert.ntfy]
 enabled = false
 server = "https://ntfy.sh"
-topic = "pingair-oskar"
+topic = "pingair-CHANGE-ME"
 
 [alert.telegram]
 enabled = false
@@ -29,7 +30,7 @@ chat_id = ""
 [ui]
 enabled = true
 bind = "127.0.0.1:3850"
-token = "19531abbf4c04e04aa74c499"
+token = "CHANGE-ME"   # openssl rand -hex 16
 
 [[routes]]
 name = "WAW → BCN"
