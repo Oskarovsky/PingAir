@@ -88,24 +88,22 @@ func (t *Travelpayouts) pricesForDates(route config.Route) (Quote, error) {
 	}
 	opts := make([]FareOption, 0, len(parsed.Data))
 	for _, o := range parsed.Data {
+		dep, ret := dateOnly(o.DepartureAt), dateOnly(o.ReturnAt)
+		link := o.Link
+		if link != "" && !strings.HasPrefix(link, "http") {
+			link = "https://www.aviasales.pl" + link
+		}
+		if link == "" {
+			link = searchLink(route.Origin, route.Destination, dep, ret)
+		}
 		opts = append(opts, FareOption{
-			Price:      o.Price,
-			Carrier:    o.Airline,
-			DepartDate: dateOnly(o.DepartureAt),
-			ReturnDate: dateOnly(o.ReturnAt),
+			Price: o.Price, Carrier: o.Airline, DepartDate: dep, ReturnDate: ret, Link: link,
 		})
 	}
-	top := topDistinctDepart(opts, 3)
+	top := attachSearchLinks(route, topDistinctDepart(opts, 3))
 	best := top[0]
-	link := parsed.Data[0].Link
-	for _, o := range parsed.Data {
-		if o.Price == best.Price && dateOnly(o.DepartureAt) == best.DepartDate {
-			link = o.Link
-			break
-		}
-	}
 	cur := parsed.Data[0].Currency
-	qte := t.makeQuote(route, best.Price, best.Carrier, cur, link)
+	qte := t.makeQuote(route, best.Price, best.Carrier, cur, best.Link)
 	qte.DepartDate = best.DepartDate
 	qte.ReturnDate = best.ReturnDate
 	qte.Options = top
@@ -150,27 +148,27 @@ func (t *Travelpayouts) pricesLatest(route config.Route) (Quote, error) {
 	}
 	opts := make([]FareOption, 0, len(parsed.Data))
 	for _, o := range parsed.Data {
+		dep, ret := dateOnly(o.DepartDate), dateOnly(o.ReturnDate)
 		opts = append(opts, FareOption{
 			Price:      o.Value,
 			Carrier:    o.Airline,
-			DepartDate: dateOnly(o.DepartDate),
-			ReturnDate: dateOnly(o.ReturnDate),
+			Gate:       o.Gate,
+			DepartDate: dep,
+			ReturnDate: ret,
+			Link:       searchLink(route.Origin, route.Destination, dep, ret),
 		})
 	}
-	top := topDistinctDepart(opts, 3)
+	top := attachSearchLinks(route, topDistinctDepart(opts, 3))
 	best := top[0]
-	qte := t.makeQuote(route, best.Price, best.Carrier, route.Currency, "")
+	seller := best.Carrier
+	if seller == "" {
+		seller = best.Gate
+	}
+	qte := t.makeQuote(route, best.Price, seller, route.Currency, best.Link)
 	qte.DepartDate = best.DepartDate
 	qte.ReturnDate = best.ReturnDate
 	qte.Options = top
-	// Deep link z konkretną datą najtańszej
-	if best.DepartDate != "" {
-		qte.DeepLink = fmt.Sprintf("https://www.aviasales.pl/search/%s%s%s",
-			strings.ToUpper(route.Origin),
-			strings.ReplaceAll(best.DepartDate, "-", ""),
-			strings.ToUpper(route.Destination),
-		)
-	}
+	qte.DeepLink = best.Link
 	return qte, nil
 }
 
@@ -220,30 +218,23 @@ func (t *Travelpayouts) pricesCheap(route config.Route) (Quote, error) {
 	}
 	opts := make([]FareOption, 0, len(byIdx))
 	for _, o := range byIdx {
+		dep, ret := dateOnly(o.DepartureAt), dateOnly(o.ReturnAt)
 		opts = append(opts, FareOption{
-			Price:      o.Price,
-			Carrier:    o.Airline,
-			DepartDate: dateOnly(o.DepartureAt),
-			ReturnDate: dateOnly(o.ReturnAt),
+			Price: o.Price, Carrier: o.Airline, DepartDate: dep, ReturnDate: ret,
+			Link: searchLink(route.Origin, route.Destination, dep, ret),
 		})
 	}
 	if len(opts) == 0 {
 		return Quote{}, fmt.Errorf("brak ofert Travelpayouts dla %s", route.Name)
 	}
-	top := topDistinctDepart(opts, 3)
+	top := attachSearchLinks(route, topDistinctDepart(opts, 3))
 	best := top[0]
 	cur := parsed.Currency
-	qte := t.makeQuote(route, best.Price, best.Carrier, cur, "")
+	qte := t.makeQuote(route, best.Price, best.Carrier, cur, best.Link)
 	qte.DepartDate = best.DepartDate
 	qte.ReturnDate = best.ReturnDate
 	qte.Options = top
-	if best.DepartDate != "" {
-		qte.DeepLink = fmt.Sprintf("https://www.aviasales.pl/search/%s%s%s",
-			strings.ToUpper(route.Origin),
-			strings.ReplaceAll(best.DepartDate, "-", ""),
-			strings.ToUpper(route.Destination),
-		)
-	}
+	qte.DeepLink = best.Link
 	return qte, nil
 }
 
@@ -296,6 +287,33 @@ func dateOnly(s string) string {
 		return s[:10]
 	}
 	return s
+}
+
+// searchLink — Aviasales (DDMM) + fallback Google Flights.
+func searchLink(origin, dest, depart, ret string) string {
+	o, d := strings.ToUpper(origin), strings.ToUpper(dest)
+	ddmm := func(iso string) string {
+		if len(iso) < 10 {
+			return ""
+		}
+		return iso[8:10] + iso[5:7] // DDMM
+	}
+	if dep := ddmm(depart); dep != "" {
+		if r := ddmm(ret); r != "" {
+			return fmt.Sprintf("https://www.aviasales.pl/search/%s%s%s%s", o, dep, d, r)
+		}
+		return fmt.Sprintf("https://www.aviasales.pl/search/%s%s%s1", o, dep, d)
+	}
+	return fmt.Sprintf("https://www.google.com/travel/flights?q=Flights%%20%s%%20to%%20%s", o, d)
+}
+
+func attachSearchLinks(route config.Route, opts []FareOption) []FareOption {
+	for i := range opts {
+		if opts[i].Link == "" {
+			opts[i].Link = searchLink(route.Origin, route.Destination, opts[i].DepartDate, opts[i].ReturnDate)
+		}
+	}
+	return opts
 }
 
 // topDistinctDepart — najtańsze oferty, max N różnych dat wylotu.

@@ -94,18 +94,20 @@ func (d *DB) UpsertRouteFares(q provider.Quote) error {
 	opts := q.Options
 	if len(opts) == 0 {
 		opts = []provider.FareOption{{
-			Price: q.Price, Carrier: q.Carrier, DepartDate: q.DepartDate, ReturnDate: q.ReturnDate,
+			Price: q.Price, Carrier: q.Carrier, DepartDate: q.DepartDate, ReturnDate: q.ReturnDate, Link: q.DeepLink,
 		}}
 	}
 	type row struct {
 		Price      float64 `json:"price"`
 		Carrier    string  `json:"carrier"`
+		Gate       string  `json:"gate"`
 		DepartDate string  `json:"depart"`
 		ReturnDate string  `json:"return"`
+		Link       string  `json:"link"`
 	}
 	payload := make([]row, 0, len(opts))
 	for _, o := range opts {
-		payload = append(payload, row{o.Price, o.Carrier, o.DepartDate, o.ReturnDate})
+		payload = append(payload, row{o.Price, o.Carrier, o.Gate, o.DepartDate, o.ReturnDate, o.Link})
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -122,8 +124,10 @@ func (d *DB) UpsertRouteFares(q provider.Quote) error {
 type StoredFare struct {
 	Price      float64 `json:"price"`
 	Carrier    string  `json:"carrier"`
+	Gate       string  `json:"gate"`
 	DepartDate string  `json:"depart"`
 	ReturnDate string  `json:"return"`
+	Link       string  `json:"link"`
 }
 
 func (d *DB) RouteFares(routeKey string) ([]StoredFare, string, error) {

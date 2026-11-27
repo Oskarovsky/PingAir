@@ -353,9 +353,11 @@ button.linkish{background:transparent;color:var(--muted);border:0;padding:0;font
 input#routeFilter{min-width:12rem;flex:1}
 tr.hidden{display:none}
 .fares{list-style:none;margin:0;padding:0;font-size:.85rem;line-height:1.35}
-.fares li{padding:.1rem 0}
+.fares li{padding:.15rem 0}
 .fares .p{font-variant-numeric:tabular-nums;font-weight:600}
 .fares .d{color:var(--muted)}
+.fares a{color:var(--accent);text-decoration:none}
+.fares a:hover{text-decoration:underline}
 </style>
 </head><body>
 <header>
@@ -490,13 +492,32 @@ func formatFaresHTML(fares []db.StoredFare) string {
 		if f.ReturnDate != "" {
 			ret = " → " + f.ReturnDate
 		}
-		car := f.Carrier
-		if car == "" {
-			car = "—"
+		who := f.Carrier
+		if who == "" {
+			who = f.Gate
+		}
+		if who == "" {
+			who = "oferta"
+		}
+		via := ""
+		if f.Carrier != "" && f.Gate != "" && f.Carrier != f.Gate {
+			via = " via " + f.Gate
+		} else if f.Carrier == "" && f.Gate != "" {
+			via = "" // who already = gate
+		}
+		link := f.Link
+		if link == "" {
+			b.WriteString(fmt.Sprintf(
+				`<li><span class="p">%.0f</span> <span class="d">%s%s</span> · %s%s</li>`,
+				f.Price, html.EscapeString(dep), html.EscapeString(ret),
+				html.EscapeString(who), html.EscapeString(via),
+			))
+			continue
 		}
 		b.WriteString(fmt.Sprintf(
-			`<li><span class="p">%.0f</span> <span class="d">%s%s</span> · %s</li>`,
-			f.Price, html.EscapeString(dep), html.EscapeString(ret), html.EscapeString(car),
+			`<li><span class="p">%.0f</span> <span class="d">%s%s</span> · <a href="%s" target="_blank" rel="noopener">%s%s</a></li>`,
+			f.Price, html.EscapeString(dep), html.EscapeString(ret),
+			html.EscapeString(link), html.EscapeString(who), html.EscapeString(via),
 		))
 	}
 	b.WriteString(`</ul>`)

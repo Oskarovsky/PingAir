@@ -10,9 +10,11 @@ import (
 // FareOption — jedna oferta (cena + daty). UI trzyma do 3 różnych dat wylotu.
 type FareOption struct {
 	Price      float64
-	Carrier    string
+	Carrier    string // IATA linii (FR, W6…) jeśli znane
+	Gate       string // agencja z cache (Kiwi.com, Farera…)
 	DepartDate string // YYYY-MM-DD
 	ReturnDate string // YYYY-MM-DD or ""
+	Link       string // deep link do wyszukiwania / zakupu
 }
 
 type Quote struct {
