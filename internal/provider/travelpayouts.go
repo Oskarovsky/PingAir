@@ -289,6 +289,88 @@ func dateOnly(s string) string {
 	return s
 }
 
+// ListFares — wiele ofert na trasie (do filtrów / lot powrotny).
+func ListFares(cfg config.TravelpayoutsConfig, route config.Route, limit int) ([]FareOption, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	t := NewTravelpayouts(cfg)
+	q := url.Values{}
+	q.Set("origin", strings.ToUpper(route.Origin))
+	q.Set("destination", strings.ToUpper(route.Destination))
+	q.Set("currency", strings.ToLower(route.Currency))
+	q.Set("period_type", "year")
+	q.Set("page", "1")
+	q.Set("limit", fmt.Sprintf("%d", limit))
+	q.Set("show_to_affiliates", "true")
+	q.Set("sorting", "price")
+	q.Set("token", cfg.Token)
+	if cfg.Market != "" {
+		q.Set("market", cfg.Market)
+	}
+	body, err := t.get("https://api.travelpayouts.com/v2/prices/latest?" + q.Encode())
+	if err != nil {
+		return nil, err
+	}
+	var parsed struct {
+		Data []struct {
+			Value      float64 `json:"value"`
+			DepartDate string  `json:"depart_date"`
+			ReturnDate string  `json:"return_date"`
+			Airline    string  `json:"airline"`
+			Gate       string  `json:"gate"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, err
+	}
+	opts := make([]FareOption, 0, len(parsed.Data))
+	for _, o := range parsed.Data {
+		dep, ret := dateOnly(o.DepartDate), dateOnly(o.ReturnDate)
+		opts = append(opts, FareOption{
+			Price: o.Value, Carrier: o.Airline, Gate: o.Gate,
+			DepartDate: dep, ReturnDate: ret,
+			Link: searchLink(route.Origin, route.Destination, dep, ret),
+		})
+	}
+	return opts, nil
+}
+
+// NearDate — oferty w oknie ±days wokół around (YYYY-MM-DD), max n, po cenie.
+func NearDate(opts []FareOption, around string, days, n int) []FareOption {
+	around = dateOnly(around)
+	if around == "" || len(opts) == 0 {
+		return topDistinctDepart(opts, n)
+	}
+	t0, err := time.Parse("2006-01-02", around)
+	if err != nil {
+		return topDistinctDepart(opts, n)
+	}
+	var near []FareOption
+	for _, o := range opts {
+		td, err := time.Parse("2006-01-02", o.DepartDate)
+		if err != nil {
+			continue
+		}
+		diff := td.Sub(t0)
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff <= time.Duration(days)*24*time.Hour {
+			near = append(near, o)
+		}
+	}
+	if len(near) == 0 {
+		return topDistinctDepart(opts, n)
+	}
+	return topDistinctDepart(near, n)
+}
+
+// SearchLink is exported for UI helpers.
+func SearchLink(origin, dest, depart, ret string) string {
+	return searchLink(origin, dest, depart, ret)
+}
+
 // searchLink — Aviasales (DDMM) + fallback Google Flights.
 func searchLink(origin, dest, depart, ret string) string {
 	o, d := strings.ToUpper(origin), strings.ToUpper(dest)

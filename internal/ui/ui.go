@@ -36,6 +36,7 @@ func Serve(st *State) error {
 	mux.HandleFunc("/watch/delete", st.deleteWatch)
 	mux.HandleFunc("/watch/discover", st.discoverWatch)
 	mux.HandleFunc("/watch/poll", st.pollNow)
+	mux.HandleFunc("/watch/return-check", st.returnCheck)
 
 	log.Printf("PingAir UI on %s", st.Cfg.UI.Bind)
 	return http.ListenAndServe(st.Cfg.UI.Bind, st.auth(mux))
@@ -256,7 +257,7 @@ func (st *State) dashboard(w http.ResponseWriter, r *http.Request) {
 		if watchHint == "" {
 			watchHint = "flex"
 		}
-		faresHTML := formatFaresHTML(fares)
+		faresHTML := formatFaresHTML(fares, route.Origin, route.Destination, tok)
 		del := fmt.Sprintf(
 			`<form method="post" action="/watch/delete" style="display:inline" onsubmit="return confirm('Usunąć?')">
 			<input type="hidden" name="token" value="%s">
@@ -358,6 +359,7 @@ tr.hidden{display:none}
 .fares .d{color:var(--muted)}
 .fares a{color:var(--accent);text-decoration:none}
 .fares a:hover{text-decoration:underline}
+form.inline{display:inline;margin-left:.35rem}
 </style>
 </head><body>
 <header>
@@ -477,7 +479,7 @@ tr.hidden{display:none}
 	w.Write([]byte(page))
 }
 
-func formatFaresHTML(fares []db.StoredFare) string {
+func formatFaresHTML(fares []db.StoredFare, origin, dest, tok string) string {
 	if len(fares) == 0 {
 		return `<span class="muted">—</span>`
 	}
@@ -502,24 +504,163 @@ func formatFaresHTML(fares []db.StoredFare) string {
 		via := ""
 		if f.Carrier != "" && f.Gate != "" && f.Carrier != f.Gate {
 			via = " via " + f.Gate
-		} else if f.Carrier == "" && f.Gate != "" {
-			via = "" // who already = gate
 		}
+		around := f.ReturnDate
+		if around == "" {
+			around = f.DepartDate
+		}
+		retBtn := fmt.Sprintf(
+			`<form method="post" action="/watch/return-check" class="inline">
+			<input type="hidden" name="token" value="%s">
+			<input type="hidden" name="origin" value="%s">
+			<input type="hidden" name="destination" value="%s">
+			<input type="hidden" name="around" value="%s">
+			<input type="hidden" name="currency" value="PLN">
+			<button type="submit" class="linkish" title="Sprawdź lot powrotny w podobnym terminie">↺ powrót</button>
+			</form>`,
+			html.EscapeString(tok),
+			html.EscapeString(origin), html.EscapeString(dest),
+			html.EscapeString(around),
+		)
 		link := f.Link
 		if link == "" {
 			b.WriteString(fmt.Sprintf(
-				`<li><span class="p">%.0f</span> <span class="d">%s%s</span> · %s%s</li>`,
+				`<li><span class="p">%.0f</span> <span class="d">%s%s</span> · %s%s %s</li>`,
 				f.Price, html.EscapeString(dep), html.EscapeString(ret),
-				html.EscapeString(who), html.EscapeString(via),
+				html.EscapeString(who), html.EscapeString(via), retBtn,
 			))
 			continue
 		}
 		b.WriteString(fmt.Sprintf(
-			`<li><span class="p">%.0f</span> <span class="d">%s%s</span> · <a href="%s" target="_blank" rel="noopener">%s%s</a></li>`,
+			`<li><span class="p">%.0f</span> <span class="d">%s%s</span> · <a href="%s" target="_blank" rel="noopener">%s%s</a> %s</li>`,
 			f.Price, html.EscapeString(dep), html.EscapeString(ret),
-			html.EscapeString(link), html.EscapeString(who), html.EscapeString(via),
+			html.EscapeString(link), html.EscapeString(who), html.EscapeString(via), retBtn,
 		))
 	}
 	b.WriteString(`</ul>`)
 	return b.String()
+}
+
+func (st *State) returnCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	_ = r.ParseForm()
+	origin := strings.ToUpper(strings.TrimSpace(r.FormValue("origin")))
+	dest := strings.ToUpper(strings.TrimSpace(r.FormValue("destination")))
+	around := strings.TrimSpace(r.FormValue("around"))
+	currency := strings.ToUpper(strings.TrimSpace(r.FormValue("currency")))
+	if currency == "" {
+		currency = "PLN"
+	}
+	tok := st.qToken(r)
+	if origin == "" || dest == "" {
+		st.redirectHome(w, r, "brak+trasy")
+		return
+	}
+	if st.Cfg.Travelpayouts.Token == "" {
+		st.redirectHome(w, r, "brak+travelpayouts.token")
+		return
+	}
+
+	// Lot powrotny = odwrotny kierunek, termin ≈ data powrotu (lub wylotu) oryginału.
+	rev := config.Route{
+		Name: dest + " → " + origin, Origin: dest, Destination: origin, Currency: currency,
+	}
+	all, err := provider.ListFares(st.Cfg.Travelpayouts, rev, 40)
+	if err != nil || len(all) == 0 {
+		st.Events.Push("return-check fail " + rev.Name)
+		st.redirectHome(w, r, "brak+ofert+powrotnych")
+		return
+	}
+	near := provider.NearDate(all, around, 10, 5)
+	overall := provider.NearDate(all, "", 0, 3) // top 3 any date via empty around → topDistinct
+
+	st.Events.Push(fmt.Sprintf("return-check %s around %s → %d near", rev.Name, around, len(near)))
+
+	var nearHTML, allHTML strings.Builder
+	renderOpts := func(b *strings.Builder, opts []provider.FareOption) {
+		b.WriteString(`<ul class="fares">`)
+		for _, f := range opts {
+			who := f.Carrier
+			if who == "" {
+				who = f.Gate
+			}
+			if who == "" {
+				who = "oferta"
+			}
+			ret := ""
+			if f.ReturnDate != "" {
+				ret = " → " + f.ReturnDate
+			}
+			link := f.Link
+			if link == "" {
+				link = provider.SearchLink(rev.Origin, rev.Destination, f.DepartDate, f.ReturnDate)
+			}
+			b.WriteString(fmt.Sprintf(
+				`<li><span class="p">%.0f %s</span> <span class="d">%s%s</span> · <a href="%s" target="_blank" rel="noopener">%s</a></li>`,
+				f.Price, html.EscapeString(currency),
+				html.EscapeString(f.DepartDate), html.EscapeString(ret),
+				html.EscapeString(link), html.EscapeString(who),
+			))
+		}
+		b.WriteString(`</ul>`)
+	}
+	renderOpts(&nearHTML, near)
+	renderOpts(&allHTML, overall)
+
+	addWatch := fmt.Sprintf(
+		`<form method="post" action="/watch/add">
+		<input type="hidden" name="token" value="%s">
+		<input type="hidden" name="origin" value="%s">
+		<input type="hidden" name="destination" value="%s">
+		<input type="hidden" name="currency" value="%s">
+		<input type="hidden" name="name" value="%s → %s">
+		<button type="submit">Dodaj %s → %s do obserwacji</button>
+		</form>`,
+		html.EscapeString(tok), html.EscapeString(dest), html.EscapeString(origin),
+		html.EscapeString(currency), html.EscapeString(dest), html.EscapeString(origin),
+		html.EscapeString(dest), html.EscapeString(origin),
+	)
+
+	page := fmt.Sprintf(`<!doctype html>
+<html lang="pl"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PingAir — powrót %s → %s</title>
+<style>
+:root{--bg:#0f1419;--card:#1a2332;--text:#e7ecf3;--muted:#8b9bb4;--line:#2a3548;--accent:#4da3ff}
+body{margin:0;font:15px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--text)}
+main{max-width:720px;margin:0 auto;padding:1.5rem;display:grid;gap:1.25rem}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1rem}
+.muted{color:var(--muted);font-size:.9rem}
+.fares{list-style:none;margin:0;padding:0}.fares li{padding:.35rem 0;border-bottom:1px solid var(--line)}
+.fares .p{font-weight:600;font-variant-numeric:tabular-nums}.fares .d{color:var(--muted)}
+.fares a{color:var(--accent)}
+a.back{color:var(--accent)}
+button{font:inherit;border-radius:6px;border:0;background:var(--accent);color:#041018;font-weight:600;padding:.5rem .85rem;cursor:pointer}
+</style></head><body><main>
+<p><a class="back" href="/?token=%s">← wróć do panelu</a></p>
+<div class="panel">
+  <h1 style="margin:0 0 .35rem;font-size:1.2rem">Lot powrotny: %s → %s</h1>
+  <p class="muted">Szukasz powrotu względem %s → %s, termin ok. <strong>%s</strong> (±10 dni).</p>
+</div>
+<div class="panel">
+  <h2 style="margin-top:0;font-size:1rem">W podobnym terminie</h2>
+  %s
+</div>
+<div class="panel">
+  <h2 style="margin-top:0;font-size:1rem">Najtańsze ogólnie (odwrotny kierunek)</h2>
+  %s
+</div>
+<div class="panel">%s</div>
+</main></body></html>`,
+		html.EscapeString(dest), html.EscapeString(origin),
+		html.EscapeString(tok),
+		html.EscapeString(dest), html.EscapeString(origin),
+		html.EscapeString(origin), html.EscapeString(dest), html.EscapeString(around),
+		nearHTML.String(), allHTML.String(), addWatch,
+	)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(page))
 }
