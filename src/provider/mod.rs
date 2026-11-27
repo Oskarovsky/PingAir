@@ -1,5 +1,6 @@
 mod amadeus;
 mod mock;
+mod serpapi;
 mod travelpayouts;
 
 use crate::config::{Config, Route};
@@ -10,6 +11,7 @@ pub enum Provider {
     Mock(mock::MockProvider),
     Amadeus(amadeus::AmadeusProvider),
     Travelpayouts(travelpayouts::TravelpayoutsProvider),
+    Serpapi(serpapi::SerpapiProvider),
 }
 
 impl Provider {
@@ -22,6 +24,9 @@ impl Provider {
             "travelpayouts" | "aviasales" => Ok(Self::Travelpayouts(
                 travelpayouts::TravelpayoutsProvider::new(cfg.travelpayouts.clone())?,
             )),
+            "serpapi" | "google_flights" | "google" => Ok(Self::Serpapi(
+                serpapi::SerpapiProvider::new(cfg.serpapi.clone())?,
+            )),
             other => anyhow::bail!("nieznany provider: {other}"),
         }
     }
@@ -31,6 +36,7 @@ impl Provider {
             Self::Mock(p) => p.quote(route).await,
             Self::Amadeus(p) => p.quote(route).await,
             Self::Travelpayouts(p) => p.quote(route).await,
+            Self::Serpapi(p) => p.quote(route).await,
         }
     }
 }

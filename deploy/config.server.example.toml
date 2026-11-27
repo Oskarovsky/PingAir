@@ -2,12 +2,18 @@
 # NIE commituj prawdziwego config.toml (token, Amadeus, Telegram).
 # Po zmianie na serwerze: sudo systemctl restart pingair
 
-poll_interval_secs = 900
+poll_interval_secs = 21600   # 6h — free SerpApi ~250/mies. przy 2 trasach
 db_path = "/opt/pingair/data/pingair.db"
-provider = "travelpayouts"
+# "serpapi" = Google Flights (live), "travelpayouts" = Aviasales cache
+provider = "serpapi"
+
+[serpapi]
+api_key = "CHANGE-ME"   # https://serpapi.com → API Key
+gl = "pl"
+hl = "pl"
 
 [travelpayouts]
-token = "CHANGE-ME"   # Travelpayouts → Profile → API token
+token = ""
 market = "pl"
 
 [amadeus]

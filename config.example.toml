@@ -3,9 +3,17 @@
 
 poll_interval_secs = 900          # 15 min
 db_path = "data/pingair.db"
-provider = "mock"                 # "mock" | "travelpayouts" | "amadeus"(martwy SS)
+provider = "mock"                 # "mock" | "serpapi" | "travelpayouts"
 
-# Realne ceny (cache Aviasales, ~48h): darmowy token po rejestracji
+# Google Flights (live) przez SerpApi — 250 free searches/mies.
+# https://serpapi.com/users/sign_up  → API Key
+# Przy 2 trasach: poll co ~6h (żeby zmieścić się w free).
+[serpapi]
+api_key = ""
+gl = "pl"
+hl = "pl"
+
+# Cache Aviasales (prawie unlimited, ceny z wyszukiwań użytkowników)
 # https://www.travelpayouts.com/ → Profile → API token
 [travelpayouts]
 token = ""

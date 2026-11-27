@@ -20,12 +20,27 @@ cargo run -- stats
 
 Mock ma ~8% szans na sztuczny dump — po kilku `once` zobaczysz alarm w logu (i ntfy, jeśli włączone).
 
-## Produkcja (Travelpayouts / Aviasales)
+## Produkcja — skąd brać ceny
 
-Amadeus Self-Service został wyłączony w lipcu 2026. PingAir bierze **realne ceny z cache Aviasales** (Travelpayouts Data API) — darmowy token, bez karty.
+Amadeus Self-Service padł w lipcu 2026. Google **nie ma** oficjalnego Flights API. Działające opcje:
 
-1. Załóż konto: [travelpayouts.com](https://www.travelpayouts.com/) → **Profile → API token**
-2. W `config.toml`:
+### A) Google Flights live — SerpApi (zalecane)
+
+[serpapi.com](https://serpapi.com/) scrapuje Google Flights do JSON (`price_insights.lowest_price`). Free: **250 searches/mies.**
+
+```toml
+provider = "serpapi"
+poll_interval_secs = 21600   # 6h × 2 trasy ≈ 240/mies.
+
+[serpapi]
+api_key = "…"
+gl = "pl"
+hl = "pl"
+```
+
+### B) Aviasales cache — Travelpayouts (darmowy, prawie unlimited)
+
+Token po rejestracji: [travelpayouts.com](https://www.travelpayouts.com/) → Profile → API token. Ceny z cache wyszukiwań (~2–7 dni) — dobre do trendów.
 
 ```toml
 provider = "travelpayouts"
@@ -34,8 +49,6 @@ provider = "travelpayouts"
 token = "…"
 market = "pl"
 ```
-
-Dane to ceny z wyszukiwań użytkowników (cache ~2–7 dni) — dobre do rolling mean / dumpów, nie do natychmiastowego bookingu.
 
 ## Alerty
 

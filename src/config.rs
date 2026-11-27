@@ -15,6 +15,8 @@ pub struct Config {
     pub amadeus: AmadeusConfig,
     #[serde(default)]
     pub travelpayouts: TravelpayoutsConfig,
+    #[serde(default)]
+    pub serpapi: SerpapiConfig,
     pub alert: AlertConfig,
     #[serde(default)]
     pub ui: UiConfig,
@@ -87,6 +89,24 @@ pub struct TravelpayoutsConfig {
 }
 
 fn default_tp_market() -> String {
+    "pl".into()
+}
+
+/// Google Flights przez SerpApi (brak oficjalnego API Google).
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct SerpapiConfig {
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default = "default_serp_gl")]
+    pub gl: String,
+    #[serde(default = "default_serp_hl")]
+    pub hl: String,
+}
+
+fn default_serp_gl() -> String {
+    "pl".into()
+}
+fn default_serp_hl() -> String {
     "pl".into()
 }
 
@@ -194,8 +214,11 @@ impl Config {
             bail!("poll_interval_secs minimum 60");
         }
         match self.provider.as_str() {
-            "mock" | "amadeus" | "travelpayouts" | "aviasales" => {}
-            other => bail!("nieznany provider: {other} (mock|travelpayouts|amadeus)"),
+            "mock" | "amadeus" | "travelpayouts" | "aviasales" | "serpapi" | "google_flights"
+            | "google" => {}
+            other => {
+                bail!("nieznany provider: {other} (mock|serpapi|travelpayouts|amadeus)")
+            }
         }
         if self.provider == "amadeus"
             && (self.amadeus.client_id.is_empty() || self.amadeus.client_secret.is_empty())
@@ -206,6 +229,13 @@ impl Config {
             && self.travelpayouts.token.is_empty()
         {
             bail!("provider=travelpayouts wymaga travelpayouts.token (Travelpayouts → Profile → API token)");
+        }
+        if matches!(
+            self.provider.as_str(),
+            "serpapi" | "google_flights" | "google"
+        ) && self.serpapi.api_key.is_empty()
+        {
+            bail!("provider=serpapi wymaga serpapi.api_key (serpapi.com → API Key, Google Flights)");
         }
         Ok(())
     }
