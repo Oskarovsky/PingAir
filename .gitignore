@@ -1,0 +1,12 @@
+/target/
+/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.env.*
+!.env.example
+config.toml
+config.local.toml
+.DS_Store
+*.log
