@@ -17,7 +17,14 @@ import (
 )
 
 func PollOnce(cfg *config.Config, database *db.DB, prov provider.Provider, events *eventlog.EventLog) error {
-	for _, route := range cfg.Routes {
+	routes, err := database.ListWatches()
+	if err != nil {
+		return err
+	}
+	if len(routes) == 0 {
+		routes = cfg.Routes
+	}
+	for _, route := range routes {
 		quote, err := prov.Quote(route)
 		if err != nil {
 			log.Printf("quote failed %s: %v", route.Name, err)
@@ -73,8 +80,9 @@ func inCooldown(database *db.DB, routeKey string, hours uint64) (bool, error) {
 }
 
 func RunLoop(cfg *config.Config, database *db.DB, prov provider.Provider, events *eventlog.EventLog) error {
-	events.Push(fmt.Sprintf("start provider=%s routes=%d interval=%ds", cfg.Provider, len(cfg.Routes), cfg.PollIntervalSecs))
-	log.Printf("PingAir start provider=%s routes=%d interval=%ds", cfg.Provider, len(cfg.Routes), cfg.PollIntervalSecs)
+	n, _ := database.WatchCount()
+	events.Push(fmt.Sprintf("start provider=%s watches=%d interval=%ds", cfg.Provider, n, cfg.PollIntervalSecs))
+	log.Printf("PingAir start provider=%s watches=%d interval=%ds", cfg.Provider, n, cfg.PollIntervalSecs)
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)

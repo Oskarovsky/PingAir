@@ -25,10 +25,12 @@ func NewTravelpayouts(cfg config.TravelpayoutsConfig) *Travelpayouts {
 }
 
 func (t *Travelpayouts) Quote(route config.Route) (Quote, error) {
-	if q, err := t.pricesForDates(route); err == nil {
-		return q, nil
+	if route.DepartDate != "" {
+		if q, err := t.pricesForDates(route); err == nil {
+			return q, nil
+		}
 	}
-	// Cache często nie ma dokładnej daty — bierz najtańszy dostępny na trasie.
+	// Bez daty / pusty cache daty → najtańszy dostępny na trasie OD.
 	return t.pricesCheap(route)
 }
 

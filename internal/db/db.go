@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/Oskarovsky/PingAir/internal/config"
 	"github.com/Oskarovsky/PingAir/internal/provider"
 	"github.com/Oskarovsky/PingAir/internal/stats"
 	_ "modernc.org/sqlite"
@@ -49,6 +51,17 @@ func Open(path string) (*DB, error) {
 			created_at TEXT NOT NULL
 		);
 		CREATE INDEX IF NOT EXISTS idx_alerts_route_time ON alerts(route_key, created_at);
+		CREATE TABLE IF NOT EXISTS watches (
+			route_key TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			origin TEXT NOT NULL,
+			destination TEXT NOT NULL,
+			depart_date TEXT NOT NULL DEFAULT '',
+			return_date TEXT NOT NULL DEFAULT '',
+			adults INTEGER NOT NULL DEFAULT 1,
+			currency TEXT NOT NULL DEFAULT 'PLN',
+			created_at TEXT NOT NULL
+		);
 	`); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -197,3 +210,76 @@ func (d *DB) AlertCount() (int64, error) {
 }
 
 func (d *DB) String() string { return fmt.Sprintf("db(%p)", d) }
+
+// SeedWatchesFromConfig kopiuje [[routes]] z TOML gdy tabela watches jest pusta.
+func (d *DB) SeedWatchesFromConfig(routes []config.Route) error {
+	n, err := d.WatchCount()
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	for _, r := range routes {
+		if err := d.UpsertWatch(r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *DB) WatchCount() (int64, error) {
+	var n int64
+	err := d.conn.QueryRow(`SELECT COUNT(*) FROM watches`).Scan(&n)
+	return n, err
+}
+
+func (d *DB) ListWatches() ([]config.Route, error) {
+	rows, err := d.conn.Query(
+		`SELECT name, origin, destination, depart_date, return_date, adults, currency FROM watches ORDER BY origin, destination`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []config.Route
+	for rows.Next() {
+		var r config.Route
+		var adults int
+		if err := rows.Scan(&r.Name, &r.Origin, &r.Destination, &r.DepartDate, &r.ReturnDate, &adults, &r.Currency); err != nil {
+			return nil, err
+		}
+		r.Adults = uint32(adults)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) UpsertWatch(r config.Route) error {
+	if r.Adults == 0 {
+		r.Adults = 1
+	}
+	if r.Currency == "" {
+		r.Currency = "PLN"
+	}
+	if r.Name == "" {
+		r.Name = fmt.Sprintf("%s → %s", r.Origin, r.Destination)
+	}
+	_, err := d.conn.Exec(
+		`INSERT INTO watches (route_key, name, origin, destination, depart_date, return_date, adults, currency, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(route_key) DO UPDATE SET
+		   name=excluded.name, origin=excluded.origin, destination=excluded.destination,
+		   depart_date=excluded.depart_date, return_date=excluded.return_date,
+		   adults=excluded.adults, currency=excluded.currency`,
+		r.Key(), r.Name, strings.ToUpper(r.Origin), strings.ToUpper(r.Destination),
+		r.DepartDate, r.ReturnDate, r.Adults, strings.ToUpper(r.Currency),
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+func (d *DB) DeleteWatch(routeKey string) error {
+	_, err := d.conn.Exec(`DELETE FROM watches WHERE route_key = ?`, routeKey)
+	return err
+}

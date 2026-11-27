@@ -70,6 +70,7 @@ func main() {
 		database, err := db.Open(cfg.DBPath)
 		must(err)
 		defer database.Close()
+		must(database.SeedWatchesFromConfig(cfg.Routes))
 		prov, err := provider.New(cfg)
 		must(err)
 		events := eventlog.New()
@@ -77,13 +78,10 @@ func main() {
 	case "run":
 		cfg, err := config.Load(cfgPath)
 		must(err)
-		// UI: default enabled if not explicitly false in older configs — keep as-is from toml
-		if !cfg.UI.Enabled {
-			// match Rust default: enabled true when section says so; server config has enabled=true
-		}
 		database, err := db.Open(cfg.DBPath)
 		must(err)
 		defer database.Close()
+		must(database.SeedWatchesFromConfig(cfg.Routes))
 		prov, err := provider.New(cfg)
 		must(err)
 		events := eventlog.New()
