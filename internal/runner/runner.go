@@ -35,8 +35,15 @@ func PollOnce(cfg *config.Config, database *db.DB, prov provider.Provider, event
 		if err := database.InsertSample(quote); err != nil {
 			return err
 		}
-		events.Push(fmt.Sprintf("sample %s = %.2f %s (%s)", quote.RouteName, quote.Price, quote.Currency, quote.Carrier))
-		log.Printf("sample %s = %.2f %s (%s)", quote.RouteName, quote.Price, quote.Currency, quote.Carrier)
+		dateInfo := quote.DepartDate
+		if quote.ReturnDate != "" {
+			dateInfo += "→" + quote.ReturnDate
+		}
+		if dateInfo == "" {
+			dateInfo = "?"
+		}
+		events.Push(fmt.Sprintf("sample %s = %.2f %s (%s) %s", quote.RouteName, quote.Price, quote.Currency, quote.Carrier, dateInfo))
+		log.Printf("sample %s = %.2f %s (%s) %s", quote.RouteName, quote.Price, quote.Currency, quote.Carrier, dateInfo)
 
 		prices, err := database.PricesForRoute(quote.RouteKey, cfg.Alert.WindowHours)
 		if err != nil {

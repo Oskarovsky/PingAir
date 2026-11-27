@@ -251,10 +251,12 @@ func (st *State) dashboard(w http.ResponseWriter, r *http.Request) {
 	var routes strings.Builder
 	for _, route := range watches {
 		snap, _ := database.RouteSnapshot(route.Key(), st.Cfg.Alert.WindowHours)
-		dateLabel := route.DepartDate
-		if dateLabel == "" {
-			dateLabel = "flex (najtańszy)"
+		fares, _, _ := database.RouteFares(route.Key())
+		watchHint := route.DepartDate
+		if watchHint == "" {
+			watchHint = "flex"
 		}
+		faresHTML := formatFaresHTML(fares)
 		del := fmt.Sprintf(
 			`<form method="post" action="/watch/delete" style="display:inline" onsubmit="return confirm('Usunąć?')">
 			<input type="hidden" name="token" value="%s">
@@ -264,9 +266,10 @@ func (st *State) dashboard(w http.ResponseWriter, r *http.Request) {
 		)
 		if snap == nil {
 			routes.WriteString(fmt.Sprintf(
-				`<tr><td><strong>%s</strong><div class="muted">%s → %s · %s</div></td><td colspan="5" class="muted">brak próbek</td><td>%s</td></tr>`,
+				`<tr><td><strong>%s</strong><div class="muted">%s → %s · watch %s</div></td>
+				<td colspan="2" class="muted">brak próbek</td><td colspan="3">%s</td><td>%s</td></tr>`,
 				html.EscapeString(route.Name), html.EscapeString(route.Origin), html.EscapeString(route.Destination),
-				html.EscapeString(dateLabel), del,
+				html.EscapeString(watchHint), faresHTML, del,
 			))
 			continue
 		}
@@ -281,12 +284,13 @@ func (st *State) dashboard(w http.ResponseWriter, r *http.Request) {
 			cls = "down"
 		}
 		routes.WriteString(fmt.Sprintf(
-			`<tr class="%s"><td><strong>%s</strong><div class="muted">%s → %s · %s</div></td>
+			`<tr class="%s"><td><strong>%s</strong><div class="muted">%s → %s · watch %s</div></td>
 			<td class="num">%.2f</td><td class="num">%.2f</td><td class="num">%+.1f%%</td>
-			<td class="num">%.2f – %.2f</td><td class="num">%d</td><td>%s</td></tr>`,
+			<td>%s</td><td class="num">%d</td><td>%s</td></tr>`,
 			cls, html.EscapeString(route.Name), html.EscapeString(route.Origin), html.EscapeString(route.Destination),
-			html.EscapeString(dateLabel),
-			snap.Latest, snap.Mean, vs, snap.Min, snap.Max, snap.Samples, del,
+			html.EscapeString(watchHint),
+			snap.Latest, snap.Mean, vs,
+			faresHTML, snap.Samples, del,
 		))
 	}
 
@@ -348,6 +352,10 @@ button.linkish{background:transparent;color:var(--muted);border:0;padding:0;font
 .btn-now{background:#6bcb77}
 input#routeFilter{min-width:12rem;flex:1}
 tr.hidden{display:none}
+.fares{list-style:none;margin:0;padding:0;font-size:.85rem;line-height:1.35}
+.fares li{padding:.1rem 0}
+.fares .p{font-variant-numeric:tabular-nums;font-weight:600}
+.fares .d{color:var(--muted)}
 </style>
 </head><body>
 <header>
@@ -428,7 +436,7 @@ tr.hidden{display:none}
     <h2 style="margin:0">Trasy <span class="muted" id="filterCount"></span></h2>
     <input id="routeFilter" type="search" placeholder="Filtr: WAW, BCN, dump…" autocomplete="off">
   </div>
-  <table id="routesTable"><thead><tr><th>Trasa</th><th class="num">Ostatnia</th><th class="num">Średnia</th><th class="num">vs mean</th><th class="num">min–max</th><th class="num">n</th><th></th></tr></thead>
+  <table id="routesTable"><thead><tr><th>Trasa</th><th class="num">Ostatnia</th><th class="num">Średnia</th><th class="num">vs mean</th><th>Najtańsze daty (do 3)</th><th class="num">n</th><th></th></tr></thead>
 <tbody>%s</tbody></table>
 </section>
 <section><h2>Alarmy</h2>%s</section>
@@ -465,4 +473,32 @@ tr.hidden{display:none}
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(page))
+}
+
+func formatFaresHTML(fares []db.StoredFare) string {
+	if len(fares) == 0 {
+		return `<span class="muted">—</span>`
+	}
+	var b strings.Builder
+	b.WriteString(`<ul class="fares">`)
+	for _, f := range fares {
+		dep := f.DepartDate
+		if dep == "" {
+			dep = "?"
+		}
+		ret := ""
+		if f.ReturnDate != "" {
+			ret = " → " + f.ReturnDate
+		}
+		car := f.Carrier
+		if car == "" {
+			car = "—"
+		}
+		b.WriteString(fmt.Sprintf(
+			`<li><span class="p">%.0f</span> <span class="d">%s%s</span> · %s</li>`,
+			f.Price, html.EscapeString(dep), html.EscapeString(ret), html.EscapeString(car),
+		))
+	}
+	b.WriteString(`</ul>`)
+	return b.String()
 }

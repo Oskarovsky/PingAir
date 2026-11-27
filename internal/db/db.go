@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -62,6 +63,12 @@ func Open(path string) (*DB, error) {
 			currency TEXT NOT NULL DEFAULT 'PLN',
 			created_at TEXT NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS route_fares (
+			route_key TEXT PRIMARY KEY,
+			currency TEXT NOT NULL DEFAULT 'PLN',
+			payload TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);
 	`); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -77,7 +84,64 @@ func (d *DB) InsertSample(q provider.Quote) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		q.RouteKey, q.RouteName, q.Price, q.Currency, q.Carrier, q.DeepLink, q.FetchedAt.UTC().Format(time.RFC3339),
 	)
+	if err != nil {
+		return err
+	}
+	return d.UpsertRouteFares(q)
+}
+
+func (d *DB) UpsertRouteFares(q provider.Quote) error {
+	opts := q.Options
+	if len(opts) == 0 {
+		opts = []provider.FareOption{{
+			Price: q.Price, Carrier: q.Carrier, DepartDate: q.DepartDate, ReturnDate: q.ReturnDate,
+		}}
+	}
+	type row struct {
+		Price      float64 `json:"price"`
+		Carrier    string  `json:"carrier"`
+		DepartDate string  `json:"depart"`
+		ReturnDate string  `json:"return"`
+	}
+	payload := make([]row, 0, len(opts))
+	for _, o := range opts {
+		payload = append(payload, row{o.Price, o.Carrier, o.DepartDate, o.ReturnDate})
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	_, err = d.conn.Exec(
+		`INSERT INTO route_fares (route_key, currency, payload, updated_at) VALUES (?, ?, ?, ?)
+		 ON CONFLICT(route_key) DO UPDATE SET currency=excluded.currency, payload=excluded.payload, updated_at=excluded.updated_at`,
+		q.RouteKey, q.Currency, string(raw), time.Now().UTC().Format(time.RFC3339),
+	)
 	return err
+}
+
+type StoredFare struct {
+	Price      float64 `json:"price"`
+	Carrier    string  `json:"carrier"`
+	DepartDate string  `json:"depart"`
+	ReturnDate string  `json:"return"`
+}
+
+func (d *DB) RouteFares(routeKey string) ([]StoredFare, string, error) {
+	var payload, currency string
+	err := d.conn.QueryRow(
+		`SELECT payload, currency FROM route_fares WHERE route_key = ?`, routeKey,
+	).Scan(&payload, &currency)
+	if err == sql.ErrNoRows {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	var out []StoredFare
+	if err := json.Unmarshal([]byte(payload), &out); err != nil {
+		return nil, currency, err
+	}
+	return out, currency, nil
 }
 
 func (d *DB) PricesForRoute(routeKey string, windowHours uint64) ([]float64, error) {
