@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Oskarovsky/PingAir/internal/config"
 	"github.com/Oskarovsky/PingAir/internal/db"
 	"github.com/Oskarovsky/PingAir/internal/discover"
 	"github.com/Oskarovsky/PingAir/internal/eventlog"
+	"github.com/Oskarovsky/PingAir/internal/provider"
+	"github.com/Oskarovsky/PingAir/internal/runner"
 )
 
 type State struct {
@@ -20,9 +23,10 @@ type State struct {
 	Cfg       *config.Config
 	Events    *eventlog.EventLog
 	StartedAt time.Time
+	PollMu    sync.Mutex
 }
 
-func Serve(st State) error {
+func Serve(st *State) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("ok"))
@@ -31,12 +35,13 @@ func Serve(st State) error {
 	mux.HandleFunc("/watch/add", st.addWatch)
 	mux.HandleFunc("/watch/delete", st.deleteWatch)
 	mux.HandleFunc("/watch/discover", st.discoverWatch)
+	mux.HandleFunc("/watch/poll", st.pollNow)
 
 	log.Printf("PingAir UI on %s", st.Cfg.UI.Bind)
 	return http.ListenAndServe(st.Cfg.UI.Bind, st.auth(mux))
 }
 
-func (st State) auth(next http.Handler) http.Handler {
+func (st *State) auth(next http.Handler) http.Handler {
 	token := st.Cfg.UI.Token
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token == "" || r.URL.Path == "/healthz" {
@@ -59,14 +64,14 @@ func (st State) auth(next http.Handler) http.Handler {
 	})
 }
 
-func (st State) qToken(r *http.Request) string {
+func (st *State) qToken(r *http.Request) string {
 	if t := r.URL.Query().Get("token"); t != "" {
 		return t
 	}
 	return st.Cfg.UI.Token
 }
 
-func (st State) redirectHome(w http.ResponseWriter, r *http.Request, flash string) {
+func (st *State) redirectHome(w http.ResponseWriter, r *http.Request, flash string) {
 	tok := st.qToken(r)
 	u := "/?token=" + tok
 	if flash != "" {
@@ -75,7 +80,7 @@ func (st State) redirectHome(w http.ResponseWriter, r *http.Request, flash strin
 	http.Redirect(w, r, u, http.StatusSeeOther)
 }
 
-func (st State) addWatch(w http.ResponseWriter, r *http.Request) {
+func (st *State) addWatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", 405)
 		return
@@ -114,7 +119,7 @@ func (st State) addWatch(w http.ResponseWriter, r *http.Request) {
 	st.redirectHome(w, r, "dodano+"+route.Origin+"→"+route.Destination)
 }
 
-func (st State) deleteWatch(w http.ResponseWriter, r *http.Request) {
+func (st *State) deleteWatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", 405)
 		return
@@ -132,7 +137,7 @@ func (st State) deleteWatch(w http.ResponseWriter, r *http.Request) {
 	st.redirectHome(w, r, "usunieto")
 }
 
-func (st State) discoverWatch(w http.ResponseWriter, r *http.Request) {
+func (st *State) discoverWatch(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", 405)
 		return
@@ -195,7 +200,40 @@ func (st State) discoverWatch(w http.ResponseWriter, r *http.Request) {
 	st.redirectHome(w, r, strings.ReplaceAll(msg, " ", "+"))
 }
 
-func (st State) dashboard(w http.ResponseWriter, r *http.Request) {
+func (st *State) pollNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", 405)
+		return
+	}
+	if !st.PollMu.TryLock() {
+		st.redirectHome(w, r, "poll+już+trwa")
+		return
+	}
+	defer st.PollMu.Unlock()
+
+	st.Events.Push("manual poll…")
+	database, err := db.Open(st.DBPath)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	defer database.Close()
+	prov, err := provider.New(st.Cfg)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+	if err := runner.PollOnce(st.Cfg, database, prov, st.Events); err != nil {
+		st.Events.Push("manual poll failed: " + err.Error())
+		st.redirectHome(w, r, "poll+błąd")
+		return
+	}
+	n, _ := database.WatchCount()
+	st.Events.Push(fmt.Sprintf("manual poll ok (%d tras)", n))
+	st.redirectHome(w, r, fmt.Sprintf("pobrano+%d+tras", n))
+}
+
+func (st *State) dashboard(w http.ResponseWriter, r *http.Request) {
 	database, err := db.Open(st.DBPath)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -306,6 +344,10 @@ button{background:var(--accent);border-color:transparent;color:#041018;font-weig
 button.linkish{background:transparent;color:var(--muted);border:0;padding:0;font-weight:500;text-decoration:underline}
 .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:end}
 .flash{background:#1e3a2f;border:1px solid #2f6b4f;padding:.6rem 1rem;border-radius:8px}
+.toolbar{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;justify-content:space-between}
+.btn-now{background:#6bcb77}
+input#routeFilter{min-width:12rem;flex:1}
+tr.hidden{display:none}
 </style>
 </head><body>
 <header>
@@ -318,6 +360,10 @@ button.linkish{background:transparent;color:var(--muted);border:0;padding:0;font
   <div class="pill">Obserwowane: <strong>%d</strong></div>
   <div class="pill">Próg dump: <strong>−%.0f%%</strong></div>
   <div class="pill">Min próbek: <strong>%d</strong></div>
+  <form method="post" action="/watch/poll" style="margin:0">
+    <input type="hidden" name="token" value="%s">
+    <button type="submit" class="btn-now">Pobierz teraz</button>
+  </form>
 </div></section>
 
 <section class="grid">
@@ -377,16 +423,43 @@ button.linkish{background:transparent;color:var(--muted);border:0;padding:0;font
   </div>
 </section>
 
-<section><h2>Trasy</h2>
-<table><thead><tr><th>Trasa</th><th class="num">Ostatnia</th><th class="num">Średnia</th><th class="num">vs mean</th><th class="num">min–max</th><th class="num">n</th><th></th></tr></thead>
-<tbody>%s</tbody></table></section>
+<section>
+  <div class="toolbar">
+    <h2 style="margin:0">Trasy <span class="muted" id="filterCount"></span></h2>
+    <input id="routeFilter" type="search" placeholder="Filtr: WAW, BCN, dump…" autocomplete="off">
+  </div>
+  <table id="routesTable"><thead><tr><th>Trasa</th><th class="num">Ostatnia</th><th class="num">Średnia</th><th class="num">vs mean</th><th class="num">min–max</th><th class="num">n</th><th></th></tr></thead>
+<tbody>%s</tbody></table>
+</section>
 <section><h2>Alarmy</h2>%s</section>
 <section><h2>Log</h2><pre>%s</pre></section>
-</main></body></html>`,
+</main>
+<script>
+(function(){
+  const input = document.getElementById('routeFilter');
+  const rows = [...document.querySelectorAll('#routesTable tbody tr')];
+  const countEl = document.getElementById('filterCount');
+  function apply(){
+    const q = (input.value || '').trim().toLowerCase();
+    let shown = 0;
+    for (const tr of rows) {
+      const hay = tr.innerText.toLowerCase();
+      const ok = !q || hay.includes(q);
+      tr.classList.toggle('hidden', !ok);
+      if (ok) shown++;
+    }
+    countEl.textContent = q ? '(' + shown + '/' + rows.length + ')' : '(' + rows.length + ')';
+  }
+  input.addEventListener('input', apply);
+  apply();
+})();
+</script>
+</body></html>`,
 		html.EscapeString(st.Cfg.Provider), st.Cfg.PollIntervalSecs, uptime,
 		samplesN, alertsN,
 		flashHTML,
 		len(watches), st.Cfg.Alert.DropPct, st.Cfg.Alert.MinSamples,
+		html.EscapeString(tok),
 		html.EscapeString(tok), html.EscapeString(tok), html.EscapeString(tok),
 		routes.String(), alertsHTML.String(), logHTML.String(),
 	)

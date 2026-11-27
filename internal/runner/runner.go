@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -79,7 +80,7 @@ func inCooldown(database *db.DB, routeKey string, hours uint64) (bool, error) {
 	return time.Now().UTC().Before(at.Add(time.Duration(hours) * time.Hour)), nil
 }
 
-func RunLoop(cfg *config.Config, database *db.DB, prov provider.Provider, events *eventlog.EventLog) error {
+func RunLoop(cfg *config.Config, database *db.DB, prov provider.Provider, events *eventlog.EventLog, pollMu *sync.Mutex) error {
 	n, _ := database.WatchCount()
 	events.Push(fmt.Sprintf("start provider=%s watches=%d interval=%ds", cfg.Provider, n, cfg.PollIntervalSecs))
 	log.Printf("PingAir start provider=%s watches=%d interval=%ds", cfg.Provider, n, cfg.PollIntervalSecs)
@@ -89,7 +90,14 @@ func RunLoop(cfg *config.Config, database *db.DB, prov provider.Provider, events
 
 	for {
 		events.Push("poll cycle…")
-		if err := PollOnce(cfg, database, prov, events); err != nil {
+		if pollMu != nil {
+			pollMu.Lock()
+		}
+		err := PollOnce(cfg, database, prov, events)
+		if pollMu != nil {
+			pollMu.Unlock()
+		}
+		if err != nil {
 			log.Printf("poll cycle failed: %v", err)
 			events.Push(fmt.Sprintf("poll cycle failed: %v", err))
 		} else {

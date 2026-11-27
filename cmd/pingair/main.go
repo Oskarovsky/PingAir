@@ -86,15 +86,15 @@ func main() {
 		must(err)
 		events := eventlog.New()
 		started := time.Now().UTC()
+		st := &ui.State{DBPath: cfg.DBPath, Cfg: cfg, Events: events, StartedAt: started}
 		if cfg.UI.Enabled {
 			go func() {
-				st := ui.State{DBPath: cfg.DBPath, Cfg: cfg, Events: events, StartedAt: started}
 				if err := ui.Serve(st); err != nil {
 					log.Printf("UI stopped: %v", err)
 				}
 			}()
 		}
-		must(runner.RunLoop(cfg, database, prov, events))
+		must(runner.RunLoop(cfg, database, prov, events, &st.PollMu))
 	default:
 		usage()
 		os.Exit(2)
