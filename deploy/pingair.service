@@ -12,9 +12,7 @@ WorkingDirectory=/opt/pingair
 ExecStart=/opt/pingair/pingair --config /opt/pingair/config.toml run
 Restart=always
 RestartSec=20
-Environment=RUST_LOG=pingair=info
 
-# Bezpieczeństwo podstawowe
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

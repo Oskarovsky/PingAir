@@ -15,3 +15,9 @@ deploy/.server-token
 # Produkcyjne sekrety — tylko lokalnie / na serwerze
 deploy/config.server.toml
 deploy/*.local.toml
+
+/target/
+/pingair
+/pingair-linux
+*.exe
+_rust_archive/

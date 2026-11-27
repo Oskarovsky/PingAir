@@ -1,46 +1,29 @@
 # PingAir
 
-Bot / CLI w **Rust** — strzela po cenach lotów (co N minut), buduje średnią i **alarmuje**, gdy cena wyłamie się w dół vs rolling mean. Sygnał „warto kupić”.
-
-Działa na macOS i Linux (ten sam binarka po cross-compile albo native build na serwerze).
+Bot w **Go** — strzela po cenach lotów (co N minut), buduje średnią i **alarmuje**, gdy cena wyłamie się w dół vs rolling mean.
 
 Repo: [github.com/Oskarovsky/PingAir](https://github.com/Oskarovsky/PingAir)
+
+> Przepisane z Rusta na Go — deploy to `GOOS=linux go build` (sekundy), nie LTO na VPS.
 
 ## Szybki start (Mac)
 
 ```bash
 cd ~/Developer/Projects/PingAir
 cp config.example.toml config.toml
-# edytuj [[routes]] + alert.ntfy.topic
-cargo run -- init          # jeśli jeszcze nie ma config.toml
-cargo run -- once          # jedna runda (provider=mock)
-cargo run -- run           # pętla co poll_interval_secs
-cargo run -- stats
+# edytuj [[routes]] + travelpayouts.token
+go run ./cmd/pingair once
+go run ./cmd/pingair run
 ```
 
-Mock ma ~8% szans na sztuczny dump — po kilku `once` zobaczysz alarm w logu (i ntfy, jeśli włączone).
+## Produkcja — źródła cen (darmowe)
 
-## Produkcja — skąd brać ceny
+Amadeus Self-Service padł w lipcu 2026. Google nie ma oficjalnego Flights API.
 
-Amadeus Self-Service padł w lipcu 2026. Google **nie ma** oficjalnego Flights API. Działające opcje:
+### Travelpayouts / Aviasales (zalecane, 100% free)
 
-### A) Google Flights live — SerpApi (zalecane)
-
-[serpapi.com](https://serpapi.com/) scrapuje Google Flights do JSON (`price_insights.lowest_price`). Free: **250 searches/mies.**
-
-```toml
-provider = "serpapi"
-poll_interval_secs = 21600   # 6h × 2 trasy ≈ 240/mies.
-
-[serpapi]
-api_key = "…"
-gl = "pl"
-hl = "pl"
-```
-
-### B) Aviasales cache — Travelpayouts (darmowy, prawie unlimited)
-
-Token po rejestracji: [travelpayouts.com](https://www.travelpayouts.com/) → Profile → API token. Ceny z cache wyszukiwań (~2–7 dni) — dobre do trendów.
+1. Konto: https://app.travelpayouts.com/auth/sign_up/
+2. Token: https://app.travelpayouts.com/profile/api-token
 
 ```toml
 provider = "travelpayouts"
@@ -50,66 +33,37 @@ token = "…"
 market = "pl"
 ```
 
-## Alerty
+Najpierw `prices_for_dates` (dokładna data), jak cache pusty → `v1/prices/cheap` (najtańszy na trasie).
 
-- **ntfy.sh** — włącz `alert.ntfy`, ustaw `topic`, zainstaluj apkę ntfy i subskrybuj topic
-- **Telegram** — bot od @BotFather + `chat_id`
+### SerpApi = Google Flights (live, 250 free/mies.)
 
-Próg: `drop_pct` (domyślnie 12% poniżej średniej), `min_samples`, `window_hours`, `cooldown_hours`.
+```toml
+provider = "serpapi"
+poll_interval_secs = 21600
 
-## Build release
+[serpapi]
+api_key = "…"
+gl = "pl"
+hl = "pl"
+```
+
+## Build / deploy
 
 ```bash
-# Mac
-cargo build --release
-# → target/release/pingair
+# lokalnie
+go build -o pingair ./cmd/pingair
 
-# Linux (na serwerze gowhere)
-cargo build --release
-# albo z Maca (jeśli masz target):
-# rustup target add x86_64-unknown-linux-gnu
-# cargo build --release --target x86_64-unknown-linux-gnu
+# VPS (z Maca, bez kompilacji na serwerze):
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags='-s -w' -o pingair-linux ./cmd/pingair
+scp pingair-linux root@VPS:/opt/pingair/pingair
+ssh root@VPS systemctl restart pingair
 ```
 
-### systemd (szkic)
+## UI
 
-```ini
-[Unit]
-Description=PingAir flight price watcher
-After=network-online.target
+`https://pingair.slyk.pl/?token=…` (nginx → `127.0.0.1:3850`)
 
-[Service]
-WorkingDirectory=/opt/pingair
-ExecStart=/opt/pingair/pingair --config /opt/pingair/config.toml run
-Restart=always
-RestartSec=30
-User=pingair
+## Alerty
 
-[Install]
-WantedBy=multi-user.target
-```
-
-## UI (prymitywny dashboard)
-
-Przy `pingair run` i `[ui] enabled = true` wstaje strona na `bind` (domyślnie `127.0.0.1:3850`):
-
-- statystyki tras (ostatnia / średnia / vs mean / min–max)
-- ostatnie alarmy i próbki
-- log procesu od startu (auto-refresh 30s)
-
-Opcjonalnie `ui.token` — dostęp przez `?token=…` lub nagłówek `X-PingAir-Token`.
-
-Na serwerze: nginx → `pingair.slyk.pl` (patrz `deploy/`). Zarządzanie: `pingair-ctl status|logs|edit|stats`.
-
-## Komendy
-
-| Komenda | Opis |
-|---------|------|
-| `pingair init` | config.example → config.toml |
-| `pingair once` | jeden pomiar (cron) |
-| `pingair run` | pętla + UI + Ctrl-C |
-| `pingair stats` | ostatnie próbki z SQLite |
-
-## Stack
-
-Rust · Tokio · SQLite (bundled) · reqwest · clap · tracing
+- **ntfy.sh** — `alert.ntfy`
+- **Telegram** — bot + `chat_id`
