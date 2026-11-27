@@ -69,6 +69,22 @@ func Open(path string) (*DB, error) {
 			payload TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS route_rt (
+			route_key TEXT PRIMARY KEY,
+			total REAL NOT NULL,
+			out_price REAL NOT NULL,
+			ret_price REAL NOT NULL,
+			out_depart TEXT NOT NULL DEFAULT '',
+			ret_depart TEXT NOT NULL DEFAULT '',
+			out_return TEXT NOT NULL DEFAULT '',
+			ret_return TEXT NOT NULL DEFAULT '',
+			out_link TEXT NOT NULL DEFAULT '',
+			ret_link TEXT NOT NULL DEFAULT '',
+			out_who TEXT NOT NULL DEFAULT '',
+			ret_who TEXT NOT NULL DEFAULT '',
+			currency TEXT NOT NULL DEFAULT 'PLN',
+			updated_at TEXT NOT NULL
+		);
 	`); err != nil {
 		_ = conn.Close()
 		return nil, err
@@ -84,10 +100,7 @@ func (d *DB) InsertSample(q provider.Quote) error {
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		q.RouteKey, q.RouteName, q.Price, q.Currency, q.Carrier, q.DeepLink, q.FetchedAt.UTC().Format(time.RFC3339),
 	)
-	if err != nil {
-		return err
-	}
-	return d.UpsertRouteFares(q)
+	return err
 }
 
 func (d *DB) UpsertRouteFares(q provider.Quote) error {
@@ -128,6 +141,61 @@ type StoredFare struct {
 	DepartDate string  `json:"depart"`
 	ReturnDate string  `json:"return"`
 	Link       string  `json:"link"`
+}
+
+type RoundTripInfo struct {
+	Total     float64
+	OutPrice  float64
+	RetPrice  float64
+	OutDepart string
+	RetDepart string
+	OutReturn string
+	RetReturn string
+	OutLink   string
+	RetLink   string
+	OutWho    string
+	RetWho    string
+	Currency  string
+}
+
+func (d *DB) UpsertRoundTrip(watchKey string, info RoundTripInfo) error {
+	_, err := d.conn.Exec(
+		`INSERT INTO route_rt (
+			route_key, total, out_price, ret_price, out_depart, ret_depart, out_return, ret_return,
+			out_link, ret_link, out_who, ret_who, currency, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(route_key) DO UPDATE SET
+			total=excluded.total, out_price=excluded.out_price, ret_price=excluded.ret_price,
+			out_depart=excluded.out_depart, ret_depart=excluded.ret_depart,
+			out_return=excluded.out_return, ret_return=excluded.ret_return,
+			out_link=excluded.out_link, ret_link=excluded.ret_link,
+			out_who=excluded.out_who, ret_who=excluded.ret_who,
+			currency=excluded.currency, updated_at=excluded.updated_at`,
+		watchKey, info.Total, info.OutPrice, info.RetPrice,
+		info.OutDepart, info.RetDepart, info.OutReturn, info.RetReturn,
+		info.OutLink, info.RetLink, info.OutWho, info.RetWho, info.Currency,
+		time.Now().UTC().Format(time.RFC3339),
+	)
+	return err
+}
+
+func (d *DB) RoundTrip(watchKey string) (*RoundTripInfo, error) {
+	var info RoundTripInfo
+	err := d.conn.QueryRow(
+		`SELECT total, out_price, ret_price, out_depart, ret_depart, out_return, ret_return,
+		        out_link, ret_link, out_who, ret_who, currency
+		 FROM route_rt WHERE route_key = ?`, watchKey,
+	).Scan(
+		&info.Total, &info.OutPrice, &info.RetPrice, &info.OutDepart, &info.RetDepart,
+		&info.OutReturn, &info.RetReturn, &info.OutLink, &info.RetLink, &info.OutWho, &info.RetWho, &info.Currency,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &info, nil
 }
 
 func (d *DB) RouteFares(routeKey string) ([]StoredFare, string, error) {

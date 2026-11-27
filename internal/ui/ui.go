@@ -16,6 +16,7 @@ import (
 	"github.com/Oskarovsky/PingAir/internal/eventlog"
 	"github.com/Oskarovsky/PingAir/internal/provider"
 	"github.com/Oskarovsky/PingAir/internal/runner"
+	"github.com/Oskarovsky/PingAir/internal/stats"
 )
 
 type State struct {
@@ -252,12 +253,15 @@ func (st *State) dashboard(w http.ResponseWriter, r *http.Request) {
 	var routes strings.Builder
 	for _, route := range watches {
 		snap, _ := database.RouteSnapshot(route.Key(), st.Cfg.Alert.WindowHours)
+		rtSnap, _ := database.RouteSnapshot(route.RoundTripKey(), st.Cfg.Alert.WindowHours)
+		rtInfo, _ := database.RoundTrip(route.Key())
 		fares, _, _ := database.RouteFares(route.Key())
 		watchHint := route.DepartDate
 		if watchHint == "" {
 			watchHint = "flex"
 		}
 		faresHTML := formatFaresHTML(fares, route.Origin, route.Destination, tok)
+		rtHTML := formatRoundTripHTML(rtInfo, rtSnap, st.Cfg.Alert.DropPct)
 		del := fmt.Sprintf(
 			`<form method="post" action="/watch/delete" style="display:inline" onsubmit="return confirm('Usunąć?')">
 			<input type="hidden" name="token" value="%s">
@@ -265,33 +269,35 @@ func (st *State) dashboard(w http.ResponseWriter, r *http.Request) {
 			<button type="submit" class="linkish">usuń</button></form>`,
 			html.EscapeString(tok), html.EscapeString(route.Key()),
 		)
-		if snap == nil {
-			routes.WriteString(fmt.Sprintf(
-				`<tr><td><strong>%s</strong><div class="muted">%s → %s · watch %s</div></td>
-				<td colspan="2" class="muted">brak próbek</td><td colspan="3">%s</td><td>%s</td></tr>`,
-				html.EscapeString(route.Name), html.EscapeString(route.Origin), html.EscapeString(route.Destination),
-				html.EscapeString(watchHint), faresHTML, del,
-			))
-			continue
-		}
-		vs := 0.0
-		if snap.Mean > 0 {
-			vs = (snap.Latest - snap.Mean) / snap.Mean * 100
-		}
-		cls := "up"
-		if vs <= -st.Cfg.Alert.DropPct {
-			cls = "hot"
-		} else if vs < 0 {
-			cls = "down"
+		vsCell := `<span class="muted">—</span>`
+		cls := ""
+		lastCell := `<span class="muted">—</span>`
+		meanCell := `<span class="muted">—</span>`
+		nCell := "0"
+		if snap != nil {
+			vs := 0.0
+			if snap.Mean > 0 {
+				vs = (snap.Latest - snap.Mean) / snap.Mean * 100
+			}
+			cls = "up"
+			if vs <= -st.Cfg.Alert.DropPct {
+				cls = "hot"
+			} else if vs < 0 {
+				cls = "down"
+			}
+			vsCell = fmt.Sprintf(`<span class="num">%+.1f%%</span>`, vs)
+			lastCell = fmt.Sprintf(`<span class="num">%.0f</span>`, snap.Latest)
+			meanCell = fmt.Sprintf(`<span class="num">%.0f</span>`, snap.Mean)
+			nCell = fmt.Sprintf("%d", snap.Samples)
 		}
 		routes.WriteString(fmt.Sprintf(
 			`<tr class="%s"><td><strong>%s</strong><div class="muted">%s → %s · watch %s</div></td>
-			<td class="num">%.2f</td><td class="num">%.2f</td><td class="num">%+.1f%%</td>
-			<td>%s</td><td class="num">%d</td><td>%s</td></tr>`,
+			<td class="num">%s</td><td class="num">%s</td><td class="num vs">%s</td>
+			<td>%s</td><td class="rt">%s</td><td class="num">%s</td><td>%s</td></tr>`,
 			cls, html.EscapeString(route.Name), html.EscapeString(route.Origin), html.EscapeString(route.Destination),
 			html.EscapeString(watchHint),
-			snap.Latest, snap.Mean, vs,
-			faresHTML, snap.Samples, del,
+			lastCell, meanCell, vsCell,
+			faresHTML, rtHTML, nCell, del,
 		))
 	}
 
@@ -337,8 +343,11 @@ table{width:100%%;border-collapse:collapse;background:var(--card);border-radius:
 th,td{padding:.65rem .75rem;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
 th{font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 .num{text-align:right;font-variant-numeric:tabular-nums}
-tr.hot td:nth-child(4){color:var(--hot);font-weight:600}
-tr.down td:nth-child(4){color:var(--down)} tr.up td:nth-child(4){color:var(--up)}
+tr.hot td.vs{color:var(--hot);font-weight:600}
+tr.down td.vs{color:var(--down)} tr.up td.vs{color:var(--up)}
+.rt-total{font-weight:600;font-variant-numeric:tabular-nums}
+.rt-hot{color:var(--hot)}.rt-down{color:var(--down)}.rt-up{color:var(--up)}
+.rt-break{font-size:.8rem;color:var(--muted);margin-top:.15rem}
 pre{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1rem;overflow:auto;max-height:280px;font-size:12px}
 .alerts{list-style:none;padding:0;margin:0}.alerts li{padding:.5rem 0;border-bottom:1px solid var(--line)}
 .panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1rem}
@@ -440,7 +449,10 @@ form.inline{display:inline;margin-left:.35rem}
     <h2 style="margin:0">Trasy <span class="muted" id="filterCount"></span></h2>
     <input id="routeFilter" type="search" placeholder="Filtr: WAW, BCN, dump…" autocomplete="off">
   </div>
-  <table id="routesTable"><thead><tr><th>Trasa</th><th class="num">Ostatnia</th><th class="num">Średnia</th><th class="num">vs mean</th><th>Najtańsze daty (do 3)</th><th class="num">n</th><th></th></tr></thead>
+  <table id="routesTable"><thead><tr>
+    <th>Trasa</th><th class="num">Tam</th><th class="num">Śr. tam</th><th class="num">vs tam</th>
+    <th>Najtańsze daty (do 3)</th><th>Tam+powrót (±10d)</th><th class="num">n</th><th></th>
+  </tr></thead>
 <tbody>%s</tbody></table>
 </section>
 <section><h2>Alarmy</h2>%s</section>
@@ -477,6 +489,52 @@ form.inline{display:inline;margin-left:.35rem}
 	)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(page))
+}
+
+func formatRoundTripHTML(info *db.RoundTripInfo, snap *stats.RouteStats, dropPct float64) string {
+	if info == nil {
+		return `<span class="muted">brak powrotu</span>`
+	}
+	vs := 0.0
+	vsCls := ""
+	vsTxt := ""
+	if snap != nil && snap.Mean > 0 {
+		vs = (info.Total - snap.Mean) / snap.Mean * 100
+		vsCls = "rt-up"
+		if vs <= -dropPct {
+			vsCls = "rt-hot"
+		} else if vs < 0 {
+			vsCls = "rt-down"
+		}
+		vsTxt = fmt.Sprintf(` <span class="%s">(%+.0f%% vs śr. %.0f, n=%d)</span>`, vsCls, vs, snap.Mean, snap.Samples)
+	}
+	outL := info.OutLink
+	retL := info.RetLink
+	outA, retA := html.EscapeString(info.OutWho), html.EscapeString(info.RetWho)
+	if outA == "" {
+		outA = "tam"
+	}
+	if retA == "" {
+		retA = "powrót"
+	}
+	outPart := fmt.Sprintf("%.0f %s", info.OutPrice, outA)
+	if outL != "" {
+		outPart = fmt.Sprintf(`<a href="%s" target="_blank" rel="noopener">%.0f %s</a>`, html.EscapeString(outL), info.OutPrice, outA)
+	}
+	retPart := fmt.Sprintf("%.0f %s", info.RetPrice, retA)
+	if retL != "" {
+		retPart = fmt.Sprintf(`<a href="%s" target="_blank" rel="noopener">%.0f %s</a>`, html.EscapeString(retL), info.RetPrice, retA)
+	}
+	dates := html.EscapeString(info.OutDepart)
+	if info.RetDepart != "" {
+		dates += " / " + html.EscapeString(info.RetDepart)
+	}
+	return fmt.Sprintf(
+		`<div><span class="rt-total %s">%.0f</span>%s</div>
+		<div class="rt-break">%s + %s</div>
+		<div class="rt-break">%s</div>`,
+		vsCls, info.Total, vsTxt, outPart, retPart, dates,
+	)
 }
 
 func formatFaresHTML(fares []db.StoredFare, origin, dest, tok string) string {

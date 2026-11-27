@@ -84,6 +84,15 @@ func (r Route) Key() string {
 	)
 }
 
+// RoundTripKey — seria próbek sumy (tam + powrót ±10 dni).
+func (r Route) RoundTripKey() string {
+	return fmt.Sprintf("%s|%s|RT|%s",
+		strings.ToUpper(r.Origin),
+		strings.ToUpper(r.Destination),
+		strings.ToUpper(r.Currency),
+	)
+}
+
 func Load(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
