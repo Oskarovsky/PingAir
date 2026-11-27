@@ -1,0 +1,50 @@
+# Produkcja na serwerze — edytuj trasy / Amadeus / ntfy.
+# Po zmianie: sudo systemctl restart pingair
+
+poll_interval_secs = 900
+db_path = "/opt/pingair/data/pingair.db"
+provider = "mock"
+
+[amadeus]
+client_id = ""
+client_secret = ""
+hostname = "test"
+
+[alert]
+drop_pct = 12.0
+min_samples = 8
+window_hours = 168
+cooldown_hours = 12
+
+[alert.ntfy]
+enabled = false
+server = "https://ntfy.sh"
+topic = "pingair-oskar"
+
+[alert.telegram]
+enabled = false
+bot_token = ""
+chat_id = ""
+
+[ui]
+enabled = true
+bind = "127.0.0.1:3850"
+token = "19531abbf4c04e04aa74c499"
+
+[[routes]]
+name = "WAW → BCN"
+origin = "WAW"
+destination = "BCN"
+depart_date = "2026-04-10"
+return_date = "2026-04-17"
+adults = 1
+currency = "PLN"
+
+[[routes]]
+name = "KRK → MAD"
+origin = "KRK"
+destination = "MAD"
+depart_date = "2026-05-01"
+return_date = ""
+adults = 1
+currency = "PLN"

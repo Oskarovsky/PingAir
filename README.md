@@ -73,13 +73,25 @@ User=pingair
 WantedBy=multi-user.target
 ```
 
+## UI (prymitywny dashboard)
+
+Przy `pingair run` i `[ui] enabled = true` wstaje strona na `bind` (domyślnie `127.0.0.1:3850`):
+
+- statystyki tras (ostatnia / średnia / vs mean / min–max)
+- ostatnie alarmy i próbki
+- log procesu od startu (auto-refresh 30s)
+
+Opcjonalnie `ui.token` — dostęp przez `?token=…` lub nagłówek `X-PingAir-Token`.
+
+Na serwerze: nginx → `pingair.slyk.pl` (patrz `deploy/`). Zarządzanie: `pingair-ctl status|logs|edit|stats`.
+
 ## Komendy
 
 | Komenda | Opis |
 |---------|------|
 | `pingair init` | config.example → config.toml |
 | `pingair once` | jeden pomiar (cron) |
-| `pingair run` | pętla + Ctrl-C |
+| `pingair run` | pętla + UI + Ctrl-C |
 | `pingair stats` | ostatnie próbki z SQLite |
 
 ## Stack

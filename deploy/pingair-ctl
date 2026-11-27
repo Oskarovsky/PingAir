@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Zarządzanie PingAir na serwerze.
+set -euo pipefail
+CMD="${1:-status}"
+case "$CMD" in
+  status)   systemctl status pingair --no-pager ;;
+  start)    systemctl start pingair && systemctl status pingair --no-pager ;;
+  stop)     systemctl stop pingair ;;
+  restart)  systemctl restart pingair && systemctl status pingair --no-pager ;;
+  logs)     journalctl -u pingair -n "${2:-80}" --no-pager -o short-iso ;;
+  follow|f) journalctl -u pingair -f -o short-iso ;;
+  once)     sudo -u pingair /opt/pingair/pingair --config /opt/pingair/config.toml once ;;
+  stats)    sudo -u pingair /opt/pingair/pingair --config /opt/pingair/config.toml stats --limit "${2:-30}" ;;
+  config)   ${EDITOR:-nano} /opt/pingair/config.toml; echo "Po zapisie: sudo pingair-ctl restart" ;;
+  edit)     ${EDITOR:-nano} /opt/pingair/config.toml; systemctl restart pingair; systemctl status pingair --no-pager ;;
+  ui|url)   echo "Dashboard: http://127.0.0.1:3850/  (za nginx: https://pingair.slyk.pl/)"; grep -E 'token|bind' /opt/pingair/config.toml | head -5 ;;
+  *)
+    echo "Użycie: pingair-ctl {status|start|stop|restart|logs [N]|follow|once|stats [N]|config|edit|ui}"
+    exit 1
+    ;;
+esac

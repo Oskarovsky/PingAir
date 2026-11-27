@@ -150,4 +150,51 @@ impl Db {
         }
         Ok(out)
     }
+
+    pub fn recent_alerts(&self, limit: usize) -> Result<Vec<(String, f64, f64, f64, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT route_key, price, mean, drop_pct, message, created_at FROM alerts
+             ORDER BY id DESC LIMIT ?1",
+        )?;
+        let mapped = stmt.query_map(params![limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, f64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for r in mapped {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn route_snapshot(
+        &self,
+        route_key: &str,
+        window_hours: u64,
+    ) -> Result<Option<crate::models::RouteStats>> {
+        let prices = self.prices_for_route(route_key, window_hours)?;
+        if prices.is_empty() {
+            return Ok(None);
+        }
+        let latest = *prices.last().unwrap();
+        Ok(crate::stats::summarize(&prices, latest))
+    }
+
+    pub fn sample_count(&self) -> Result<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM samples", [], |r| r.get(0))
+            .map_err(Into::into)
+    }
+
+    pub fn alert_count(&self) -> Result<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM alerts", [], |r| r.get(0))
+            .map_err(Into::into)
+    }
 }

@@ -14,7 +14,38 @@ pub struct Config {
     #[serde(default)]
     pub amadeus: AmadeusConfig,
     pub alert: AlertConfig,
+    #[serde(default)]
+    pub ui: UiConfig,
     pub routes: Vec<Route>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UiConfig {
+    #[serde(default = "default_ui_enabled")]
+    pub enabled: bool,
+    /// np. 127.0.0.1:3850 (za nginx) albo 0.0.0.0:3850
+    #[serde(default = "default_ui_bind")]
+    pub bind: String,
+    /// Opcjonalny token (?token=… albo nagłówek X-PingAir-Token)
+    #[serde(default)]
+    pub token: String,
+}
+
+fn default_ui_enabled() -> bool {
+    true
+}
+fn default_ui_bind() -> String {
+    "127.0.0.1:3850".into()
+}
+
+impl Default for UiConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bind: default_ui_bind(),
+            token: String::new(),
+        }
+    }
 }
 
 fn default_poll() -> u64 {
