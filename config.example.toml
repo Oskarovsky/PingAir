@@ -3,13 +3,18 @@
 
 poll_interval_secs = 900          # 15 min
 db_path = "data/pingair.db"
-provider = "mock"                 # "mock" | "amadeus"
+provider = "mock"                 # "mock" | "travelpayouts" | "amadeus"(martwy SS)
+
+# Realne ceny (cache Aviasales, ~48h): darmowy token po rejestracji
+# https://www.travelpayouts.com/ → Profile → API token
+[travelpayouts]
+token = ""
+market = "pl"
 
 [amadeus]
-# https://developers.amadeus.com/ — Self-Service → Flight Offers Search
+# Self-Service wyłączony 2026-07-17 — zostawione tylko dla Enterprise
 client_id = ""
 client_secret = ""
-# "test" = test.api.amadeus.com, "production" = api.amadeus.com
 hostname = "test"
 
 [alert]

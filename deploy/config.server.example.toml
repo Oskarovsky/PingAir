@@ -4,7 +4,11 @@
 
 poll_interval_secs = 900
 db_path = "/opt/pingair/data/pingair.db"
-provider = "mock"
+provider = "travelpayouts"
+
+[travelpayouts]
+token = "CHANGE-ME"   # Travelpayouts → Profile → API token
+market = "pl"
 
 [amadeus]
 client_id = ""

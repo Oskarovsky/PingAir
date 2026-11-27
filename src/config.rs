@@ -13,6 +13,8 @@ pub struct Config {
     pub provider: String,
     #[serde(default)]
     pub amadeus: AmadeusConfig,
+    #[serde(default)]
+    pub travelpayouts: TravelpayoutsConfig,
     pub alert: AlertConfig,
     #[serde(default)]
     pub ui: UiConfig,
@@ -71,6 +73,21 @@ pub struct AmadeusConfig {
 
 fn default_amadeus_host() -> String {
     "test".into()
+}
+
+/// Aviasales Data API via Travelpayouts (darmowy token po rejestracji).
+/// Amadeus Self-Service został wyłączony w lipcu 2026.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct TravelpayoutsConfig {
+    #[serde(default)]
+    pub token: String,
+    /// np. "pl" — rynek cache’u Aviasales (domyślnie z origin)
+    #[serde(default = "default_tp_market")]
+    pub market: String,
+}
+
+fn default_tp_market() -> String {
+    "pl".into()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -177,13 +194,18 @@ impl Config {
             bail!("poll_interval_secs minimum 60");
         }
         match self.provider.as_str() {
-            "mock" | "amadeus" => {}
-            other => bail!("nieznany provider: {other} (mock|amadeus)"),
+            "mock" | "amadeus" | "travelpayouts" | "aviasales" => {}
+            other => bail!("nieznany provider: {other} (mock|travelpayouts|amadeus)"),
         }
         if self.provider == "amadeus"
             && (self.amadeus.client_id.is_empty() || self.amadeus.client_secret.is_empty())
         {
-            bail!("provider=amadeus wymaga amadeus.client_id i client_secret");
+            bail!("provider=amadeus wymaga amadeus.client_id i client_secret (Self-Service martwy od 2026-07)");
+        }
+        if matches!(self.provider.as_str(), "travelpayouts" | "aviasales")
+            && self.travelpayouts.token.is_empty()
+        {
+            bail!("provider=travelpayouts wymaga travelpayouts.token (Travelpayouts → Profile → API token)");
         }
         Ok(())
     }

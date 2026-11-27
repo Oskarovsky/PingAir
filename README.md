@@ -20,19 +20,22 @@ cargo run -- stats
 
 Mock ma ~8% szans na sztuczny dump — po kilku `once` zobaczysz alarm w logu (i ntfy, jeśli włączone).
 
-## Produkcja (Amadeus)
+## Produkcja (Travelpayouts / Aviasales)
 
-1. Konto: [developers.amadeus.com](https://developers.amadeus.com/) → aplikacja → **Flight Offers Search**
+Amadeus Self-Service został wyłączony w lipcu 2026. PingAir bierze **realne ceny z cache Aviasales** (Travelpayouts Data API) — darmowy token, bez karty.
+
+1. Załóż konto: [travelpayouts.com](https://www.travelpayouts.com/) → **Profile → API token**
 2. W `config.toml`:
 
 ```toml
-provider = "amadeus"
+provider = "travelpayouts"
 
-[amadeus]
-client_id = "..."
-client_secret = "..."
-hostname = "test"   # potem "production"
+[travelpayouts]
+token = "…"
+market = "pl"
 ```
+
+Dane to ceny z wyszukiwań użytkowników (cache ~2–7 dni) — dobre do rolling mean / dumpów, nie do natychmiastowego bookingu.
 
 ## Alerty
 
