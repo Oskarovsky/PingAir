@@ -324,7 +324,7 @@ func (st *State) dashboard(w http.ResponseWriter, r *http.Request) {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PingAir</title>
 <style>
-:root{--bg:#0f1419;--card:#1a2332;--text:#e7ecf3;--muted:#8b9bb4;--hot:#ff6b6b;--down:#f0c14b;--up:#6bcb77;--line:#2a3548;--accent:#4da3ff}
+:root{--bg:#0f1419;--card:#1a2332;--text:#e7ecf3;--muted:#8b9bb4;--hot:#3dd68c;--down:#6bcb77;--up:#ff6b6b;--line:#2a3548;--accent:#4da3ff}
 *{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--text)}
 header{padding:1.25rem 1.5rem;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
 h1{margin:0;font-size:1.25rem} h2{margin:0 0 .75rem;font-size:1rem}
