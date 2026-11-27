@@ -1,10 +1,12 @@
 mod alert;
 mod config;
 mod db;
+mod eventlog;
 mod models;
 mod provider;
 mod runner;
 mod stats;
+mod ui;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -26,7 +28,7 @@ struct Cli {
 enum Commands {
     /// Jedna runda pomiarów (cron-friendly)
     Once,
-    /// Pętla: strzał co poll_interval_secs
+    /// Pętla + opcjonalny UI (config [ui])
     Run,
     /// Ostatnie próbki z bazy
     Stats {
@@ -70,13 +72,31 @@ async fn main() -> Result<()> {
             let cfg = config::Config::load(&cli.config)?;
             let database = db::Db::open(&cfg.db_path)?;
             let prov = provider::Provider::from_config(&cfg)?;
-            runner::poll_once(&cfg, &database, &prov).await
+            let events = eventlog::EventLog::default();
+            runner::poll_once(&cfg, &database, &prov, &events).await
         }
         Commands::Run => {
             let cfg = config::Config::load(&cli.config)?;
             let database = db::Db::open(&cfg.db_path)?;
             let prov = provider::Provider::from_config(&cfg)?;
-            runner::run_loop(cfg, database, prov).await
+            let events = eventlog::EventLog::default();
+            let started = chrono::Utc::now();
+
+            if cfg.ui.enabled {
+                let ui_state = ui::AppState {
+                    db_path: cfg.db_path.clone(),
+                    cfg: cfg.clone(),
+                    events: events.clone(),
+                    started_at: started,
+                };
+                tokio::spawn(async move {
+                    if let Err(e) = ui::serve(ui_state).await {
+                        tracing::error!(error = %e, "UI stopped");
+                    }
+                });
+            }
+
+            runner::run_loop(cfg, database, prov, events).await
         }
     }
 }

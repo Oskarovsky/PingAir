@@ -1,0 +1,25 @@
+[Unit]
+Description=PingAir — flight price watcher
+Documentation=https://github.com/Oskarovsky/PingAir
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pingair
+Group=pingair
+WorkingDirectory=/opt/pingair
+ExecStart=/opt/pingair/pingair --config /opt/pingair/config.toml run
+Restart=always
+RestartSec=20
+Environment=RUST_LOG=pingair=info
+
+# Bezpieczeństwo podstawowe
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/pingair/data
+
+[Install]
+WantedBy=multi-user.target

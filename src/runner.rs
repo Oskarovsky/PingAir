@@ -1,17 +1,28 @@
 use crate::alert;
 use crate::config::Config;
 use crate::db::Db;
+use crate::eventlog::EventLog;
 use crate::provider::Provider;
 use crate::stats;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 use tracing::{error, info, warn};
 
-pub async fn poll_once(cfg: &Config, db: &Db, provider: &Provider) -> Result<()> {
+pub async fn poll_once(
+    cfg: &Config,
+    db: &Db,
+    provider: &Provider,
+    events: &EventLog,
+) -> Result<()> {
     for route in &cfg.routes {
         match provider.quote(route).await {
             Ok(quote) => {
                 db.insert_sample(&quote)?;
+                let line = format!(
+                    "sample {} = {:.2} {} ({})",
+                    quote.route_name, quote.price, quote.currency, quote.carrier
+                );
+                events.push(&line);
                 info!(
                     route = %quote.route_name,
                     price = quote.price,
@@ -32,6 +43,7 @@ pub async fn poll_once(cfg: &Config, db: &Db, provider: &Provider) -> Result<()>
                             route = %quote.route_name,
                             "breakout, ale cooldown — pomijam alert"
                         );
+                        events.push(format!("cooldown: {}", quote.route_name));
                         continue;
                     }
                     let msg = format!(
@@ -49,12 +61,17 @@ pub async fn poll_once(cfg: &Config, db: &Db, provider: &Provider) -> Result<()>
                         breakout.drop_pct_vs_mean,
                         &msg,
                     )?;
+                    events.push(format!("ALARM {msg}"));
                     if let Err(e) = alert::notify(&cfg.alert, &breakout).await {
                         error!(error = %e, "alert failed");
+                        events.push(format!("alert failed: {e:#}"));
                     }
                 }
             }
-            Err(e) => error!(route = %route.name, error = %e, "quote failed"),
+            Err(e) => {
+                error!(route = %route.name, error = %e, "quote failed");
+                events.push(format!("error {}: {e:#}", route.name));
+            }
         }
     }
     Ok(())
@@ -70,7 +87,18 @@ fn in_cooldown(db: &Db, route_key: &str, cooldown_hours: u64) -> Result<bool> {
     }
 }
 
-pub async fn run_loop(cfg: Config, db: Db, provider: Provider) -> Result<()> {
+pub async fn run_loop(
+    cfg: Config,
+    db: Db,
+    provider: Provider,
+    events: EventLog,
+) -> Result<()> {
+    events.push(format!(
+        "start provider={} routes={} interval={}s",
+        cfg.provider,
+        cfg.routes.len(),
+        cfg.poll_interval_secs
+    ));
     info!(
         interval_secs = cfg.poll_interval_secs,
         routes = cfg.routes.len(),
@@ -78,13 +106,18 @@ pub async fn run_loop(cfg: Config, db: Db, provider: Provider) -> Result<()> {
         "PingAir start"
     );
     loop {
-        if let Err(e) = poll_once(&cfg, &db, &provider).await {
+        events.push("poll cycle…");
+        if let Err(e) = poll_once(&cfg, &db, &provider, &events).await {
             error!(error = %e, "poll cycle failed");
+            events.push(format!("poll cycle failed: {e:#}"));
+        } else {
+            events.push("poll cycle ok");
         }
         tokio::select! {
             _ = tokio::time::sleep(std::time::Duration::from_secs(cfg.poll_interval_secs)) => {}
             _ = tokio::signal::ctrl_c() => {
                 info!("Ctrl-C — stop");
+                events.push("stop (Ctrl-C)");
                 break;
             }
         }
